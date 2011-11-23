@@ -617,7 +617,6 @@ int processDB(char *db_file,char *user,char *passwd,char *database)
     num_table = ret;
 
     for(i = 0; i < num_table; i++) {
-printf("call getTableStruct table name = %s.\n",tableNameArray[i].str);
         memset(&tableStructOne,0,sizeof(tableStructOne));
         ret = getTableStruct(pMySQL,tableNameArray[i],&tableStructOne);
         if(ret < 0) { 
@@ -626,7 +625,6 @@ printf("call getTableStruct table name = %s.\n",tableNameArray[i].str);
             goto END;
         }
 
-printf("call deleteTable.\n");
         sprintf(sql,"DROP TABLE IF EXISTS %s;\n",tableNameArray[i].str);
         ret = deleteTable(pSqlite,sql);
         if(ret < 0) { 
@@ -635,7 +633,6 @@ printf("call deleteTable.\n");
             goto END;
         }
 
-printf("call createTable.\n");
         ret = createTable(pSqlite,tableStructOne.str);
         if(ret < 0) { 
             printf("call createTable error.\n");
@@ -643,7 +640,6 @@ printf("call createTable.\n");
             goto END;
         }
 
-printf("call getIndexFromTable.\n");
         ret = getIndexFromTable(pMySQL, tableNameArray[i], &tableStructOne);
         if(ret < 0) { 
             printf("call createTable error.\n");
@@ -651,7 +647,6 @@ printf("call getIndexFromTable.\n");
             goto END;
         }
 
-printf("call createIndex.\n");
         ret = createIndex(pSqlite,tableStructOne.str);
         if(ret < 0) { 
             printf("call createIndex error.\n");
@@ -659,7 +654,6 @@ printf("call createIndex.\n");
             goto END;
         }
 
-printf("call getDataRow and insertData.\n");
         for(; 1;){
             ret = getDataRow(pMySQL, tableNameArray[i], &tableStructOne);
             if(ret < 0) { 
@@ -694,7 +688,7 @@ END:
 int usage(char *name)
 {
     if(name == NULL){
-        printf("usage: mysql2sqlite -d db file -u user -p passwd -b database name\n",);
+        printf("usage: mysql2sqlite -d db file -u user -p passwd -b database name\n");
     } else {
         printf("usage: %s -d db file -u user -p passwd -b database name\n",name);
     }
