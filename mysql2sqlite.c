@@ -58,6 +58,12 @@ int getListTables(MYSQL *pMySQL,tableName tableName[])
 
     int ret = 0;
 
+    if(pMySQL == NULL) {
+        printf("function getTableStruct parameter error.\n");
+        ret = -1;
+        goto END;
+    }
+
     sprintf(sql,"SHOW TABLE STATUS WHERE comment <> 'VIEW';\n");
 
     ret = mysql_real_query(pMySQL,sql,(unsigned int)strlen(sql));
@@ -108,7 +114,7 @@ int getTableStruct(MYSQL *pMySQL,tableName tableName,tableStruct *tableStructOne
     int ret = 0;
 
     if(pMySQL == NULL || tableStructOne == NULL) {
-        printf("can shu cuo wu\n");
+        printf("function getTableStruct parameter error.\n");
         ret = -1;
         goto END;
     }
@@ -272,7 +278,7 @@ int getIndexFromTable(MYSQL *pMySQL,tableName tableName,tableStruct *tableStruct
     int ret = 0;
 
     if(pMySQL == NULL || tableStructOne == NULL) {
-        printf("can shu cuo wu\n");
+        printf("function getIndexFromTable parameter error.\n");
         ret = -1;
         goto END;
     }
@@ -429,7 +435,7 @@ int getDataRow(MYSQL *pMySQL,tableName tableNameOne,tableStruct *tableStructOne)
     int ret = 0;
 
     if(pMySQL == NULL || tableStructOne == NULL) {
-        printf("can shu cuo wu\n");
+        printf("function getDataRow parameter error.\n");
         ret = -1;
         goto END;
     }
@@ -516,6 +522,12 @@ int execSql(sqlite3 *pSqlite,char *str)
 
     int ret = 0;
 
+    if(pSqlite == NULL || str == NULL) {
+        printf("function execSql parameter error.\n");
+        ret = -1;
+        goto END;
+    }
+
     ret = sqlite3_exec(pSqlite,str,NULL,NULL,&errMsg);
     if(ret != SQLITE_OK) {
         printf("call sqlite3_exec error.error = %s\n",errMsg);
@@ -569,7 +581,7 @@ int processDB(char *db_file,char *user,char *passwd,char *database)
 
     if(strlen(db_file) <= 0 || strlen(user) <= 0 || 
         strlen(passwd) <= 0 || strlen(database) <= 0) {
-        printf("can shu cuo wu\n");
+        printf("function processDB parameter error.\n");
         ret = -1;
         goto END;
     }
@@ -682,11 +694,10 @@ END:
 int usage(char *name)
 {
     if(name == NULL){
-        return -1;
+        printf("usage: mysql2sqlite -d db file -u user -p passwd -b database name\n",);
+    } else {
+        printf("usage: %s -d db file -u user -p passwd -b database name\n",name);
     }
-
-    printf("usage: %s -d db file -u user -p passwd -b database name\n",name);
-
     return 0;
 }
 

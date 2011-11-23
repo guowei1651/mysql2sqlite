@@ -8,14 +8,14 @@ sqlite3.o:
 test.o:
 	gcc -c $(CFLAG) test.c -o test.o
 install: sqlite3.o test.o
-	gcc $(LIBS) $(CFLAG) sqlite3.o test.o -o test
+	gcc $(LIBS) $(CFLAG) sqlite3.o mysql2sqlite.o -o mysql2sqlite
 clean:
-	@if [ -f "test" ] ; then \
-		rm -rf test ; \
+	@if [ -f "mysql2sqlite" ] ; then \
+		rm -rf mysql2sqlite ; \
 	fi
 	@if [ -f core ] ; then \
 		rm core ; \
 	fi
-	@if [ -f test.o ] ; then \
-		rm test.o ; \
+	@if [ -f mysql2sqlite.o ] ; then \
+		rm mysql2sqlite.o ; \
 	fi
