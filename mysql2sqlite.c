@@ -8,9 +8,12 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <linux/limits.h>
+#include <pthread.h>
 
 #include "sqlite3.h"
 #include "mysql.h"
+
+#define THREAD_NUM 3
 
 struct pair{
     unsigned int length;
@@ -19,6 +22,14 @@ struct pair{
 
 typedef struct pair tableName;
 typedef struct pair tableStruct;
+
+struct threadFunctionParameter {
+    void *first;
+    void *second;
+    tableName table;
+};
+
+typedef struct threadFunctionParameter threadFunctionParameter;
 
 typedef struct mysqlTableStruct {
     struct pair field;
@@ -418,100 +429,198 @@ END:
     return ret;
 }
 
-int getDataRow(MYSQL *pMySQL,tableName tableNameOne,tableStruct *tableStructOne)
+int organizedIntoSQL(tableName tableNameOne,MYSQL_FIELD *fields,int num_fields,char *sql)
 {
-    static MYSQL_RES *pMysqlResult = NULL;
-    static MYSQL_FIELD *fields = NULL;
-    MYSQL_ROW row;
-    unsigned long *lengths = NULL;
+    char tmpSQl[512] = { 0 };
 
-    static tableName staticTableName = {.length = 0,.str=""};
-
-    char sql[512] = { 0 };
-    static unsigned int num_row = 0;
-    unsigned int num_col = 0;
-    static unsigned int num_fields = 0;
+    int num_col = 0;
 
     int ret = 0;
 
-    if(pMySQL == NULL || tableStructOne == NULL) {
+    if(fields == NULL || sql == NULL) {
+        printf("function organizedIntoSQL parameter error.\n");
+        ret = -1;
+        goto END;
+    }
+    sprintf(sql, "INSERT INTO %s(",tableNameOne.str);
+    memset(tmpSQl,0,sizeof(tmpSQl));
+    for(num_col = 0; num_col < num_fields; num_col++) {
+        strcat(sql,fields[num_col].name);
+        strcat(sql,",");
+        strcat(tmpSQl,"?,");
+    }
+    sql[strlen(sql) - 1] = ')';
+    tmpSQl[strlen(tmpSQl) - 1] = 0;
+
+    strcat(sql," VALUES (");
+    strcat(sql,tmpSQl);
+    strcat(sql,");");
+
+END:
+    return 0;
+}
+
+
+int getDataRow(MYSQL *pMySQL,sqlite3 *pSqlite,tableName tableNameOne,tableStruct *tableStructOne)
+{
+    MYSQL_RES *pMysqlResult = NULL;
+    MYSQL_FIELD *fields = NULL;
+    MYSQL_ROW row;
+    unsigned long *lengths = NULL;
+
+    char sql[512] = { 0 };
+
+    unsigned long long num_row = 0;
+    unsigned int num_col = 0;
+    unsigned int num_fields = 0;
+
+    sqlite3_stmt *pStmt = NULL;
+    char *sqlTail = NULL;
+
+    int ret = 0;
+
+    if(pMySQL == NULL) {
         printf("function getDataRow parameter error.\n");
         ret = -1;
         goto END;
     }
 
-    memset(tableStructOne,0,sizeof(tableStruct));
+    printf("insert table %s start.\n",tableNameOne.str);
 
-    if(staticTableName.length == 0 || strcmp(staticTableName.str,tableNameOne.str) != 0) {
-        if(pMysqlResult != NULL) {
-            mysql_free_result(pMysqlResult);
-            pMysqlResult = NULL;
-        }
-
-        sprintf(sql,"SELECT * FROM %s;",tableNameOne.str);
-    
-        ret = mysql_real_query(pMySQL,sql,(unsigned int)strlen(sql));
-        if(ret != 0) {
-            printf("call mysql_real_query error.error = %s\n",mysql_error(pMySQL));
-            ret = -4;
-            goto END;
-        }
-        
-        pMysqlResult = mysql_store_result(pMySQL);
-        if(pMysqlResult == NULL) {
-                printf("call mysql_store_result error.error = %s\n",mysql_error(pMySQL));
-                ret = -4;
-                goto END;
-        }
-
-        memcpy(&staticTableName,&tableNameOne,sizeof(tableName));
-        
-        num_row = mysql_num_rows(pMysqlResult);
-        if(num_row < 0) {
-            printf("call mysql_num_rows error.error = %s\n",mysql_error(pMySQL));
-            ret = -4;
-            goto END;
-        } else if (num_row == 0) {
-            strcat(tableStructOne->str,"\n");
-            ret = 0;
-            goto END;
-        }
-        num_fields = mysql_num_fields(pMysqlResult);
-        fields = mysql_fetch_fields(pMysqlResult);
+    sprintf(sql,"SELECT * FROM %s;",tableNameOne.str);
+    ret = mysql_real_query(pMySQL,sql,(unsigned int)strlen(sql));
+    if(ret != 0) {
+        printf("call mysql_real_query error.error = %s\n",mysql_error(pMySQL));
+        ret = -4;
+        goto END;
     }
 
-    row = mysql_fetch_row(pMysqlResult);
-    if(row == NULL) {
-        printf("call mysql_fetch_row error.error = %s\n",mysql_error(pMySQL));
+    pMysqlResult = mysql_store_result(pMySQL);
+    if(pMysqlResult == NULL) {
+        printf("call mysql_store_result error.error = %s\n",mysql_error(pMySQL));
+        ret = -4;
+        goto END;
+    }
+
+    num_row = mysql_num_rows(pMysqlResult);
+    if(num_row < 0) {
+        printf("call mysql_num_rows error.error = %s\n",mysql_error(pMySQL));
+        ret = -4;
+        goto END;
+    } else if (num_row == 0) {
+        strcat(tableStructOne->str,"\n");
         ret = 0;
         goto END;
     }
 
-    sprintf(tableStructOne->str, "INSERT INTO %s(",tableNameOne.str);
-
-    lengths = mysql_fetch_lengths(pMysqlResult);
-    for(num_col = 0; num_col < num_fields; num_col++) {
-        strcat(tableStructOne->str,fields[num_col].name);
-        strcat(tableStructOne->str,",");
+    num_fields = mysql_num_fields(pMysqlResult);
+    fields = mysql_fetch_fields(pMysqlResult);
+    ret = organizedIntoSQL(tableNameOne,fields,num_fields,sql);
+    if (ret != 0) {
+        printf("call organizedIntoSQL error.\n");
+        ret = -3;
+        goto END;
     }
-    tableStructOne->str[strlen(tableStructOne->str) - 1] = ')';
 
-    strcat(tableStructOne->str," VALUES (");
-    for(num_col = 0; num_col < num_fields; num_col++) {
-        if(row[num_col] == NULL) {
-            strcat(tableStructOne->str,"NULL");
-        } else {
-            strcat(tableStructOne->str,"'");
-            mysql_real_escape_string(pMySQL, tableStructOne->str + strlen(tableStructOne->str), row[num_col], strlen(row[num_col]));
-            strcat(tableStructOne->str,"'");
+    ret = sqlite3_prepare(pSqlite,sql,sizeof(sql),&pStmt, (const char**)&sqlTail);
+    if (ret != SQLITE_OK) {
+        printf("call sqlite3_prepare error.error = %s\n",sqlite3_errmsg(pSqlite));
+        ret = -3;
+        goto END;
+    }
+
+    while((row = mysql_fetch_row(pMysqlResult)) != NULL) {
+        for(num_col = 0; num_col < num_fields; num_col++) {
+            if(row[num_col] == NULL) {
+                ret = sqlite3_bind_null(pStmt,num_col + 1);
+                if (ret != SQLITE_OK) {
+                    printf("call sqlite3_prepare error.error = %s\n",sqlite3_errmsg(pSqlite));
+                    ret = -3;
+                    goto END;
+                }
+            } else {
+#if 0
+                switch(num_fields[num_col].type) {
+                case MYSQL_TYPE_TINY:
+                case MYSQL_TYPE_SHORT:
+                case MYSQL_TYPE_LONG:
+                case MYSQL_TYPE_BIT:
+                case MYSQL_TYPE_ENUM:
+                case MYSQL_TYPE_CHAR:
+                    int sqlite3_bind_int(sqlite3_stmt*, int, int);
+                    break;
+    
+    	    case MYSQL_TYPE_INT24:
+                case MYSQL_TYPE_LONGLONG:
+                    int sqlite3_bind_int64(sqlite3_stmt*, int, sqlite3_int64);
+                    break;
+                case MYSQL_TYPE_DECIMAL:
+    	    case MYSQL_TYPE_NEWDECIMAL:
+                case MYSQL_TYPE_FLOAT:
+                case MYSQL_TYPE_DOUBLE:
+                    int sqlite3_bind_double(sqlite3_stmt*, int, double);
+                    break;
+    
+                case MYSQL_TYPE_TIMESTAMP:
+                case MYSQL_TYPE_DATE:
+                case MYSQL_TYPE_TIME:
+                case MYSQL_TYPE_DATETIME:
+                case MYSQL_TYPE_YEAR:
+                case MYSQL_TYPE_STRING:
+                case MYSQL_TYPE_VAR_STRING:
+                    int sqlite3_bind_text(sqlite3_stmt*, int, const char*, int n, void(*)(void*));
+                    break;
+    
+                case MYSQL_TYPE_BLOB:
+                    int sqlite3_bind_blob(sqlite3_stmt*, int, const void*, int n, void(*)(void*));
+                    break;
+                case MYSQL_TYPE_SET:
+                case MYSQL_TYPE_GEOMETRY:
+                    int sqlite3_bind_text(sqlite3_stmt*, int, const char*, int n, void(*)(void*));
+                    break;
+                    
+                case MYSQL_TYPE_NULL:
+                    int sqlite3_bind_null(sqlite3_stmt*, int);
+                    break;
+                }
+#else
+                ret = sqlite3_bind_text(pStmt, num_col + 1, row[num_col], strlen(row[num_col]), SQLITE_STATIC);
+                if (ret != SQLITE_OK) {
+                    printf("call sqlite3_bind_text error.error = %s\n",sqlite3_errmsg(pSqlite));
+                    ret = -3;
+                    goto END;
+                }
+#endif
+            }
         }
-        strcat(tableStructOne->str,",");
+
+        ret = sqlite3_step(pStmt);
+        if (ret != SQLITE_DONE) {
+            printf("call sqlite3_step error.error = %s\n",sqlite3_errmsg(pSqlite));
+            ret = -3;
+            goto END;
+        }
+
+        ret = sqlite3_reset(pStmt);
+        if (ret != SQLITE_OK) {
+            printf("call sqlite3_reset error.error = %s\n",sqlite3_errmsg(pSqlite));
+            ret = -3;
+            goto END;
+        }
     }
-    tableStructOne->str[strlen(tableStructOne->str) - 1] = ')';
-    strcat(tableStructOne->str,";");
+
+    printf("insert table %s end. totle row = %llu\n",tableNameOne.str,num_row);
 
     ret = num_row;
 END:
+    if(pStmt != NULL) {
+        sqlite3_finalize(pStmt); 
+        pStmt = NULL;
+    }
+    if(pMysqlResult != NULL) {
+        mysql_free_result(pMysqlResult);
+        pMysqlResult = NULL;
+    }
     return ret;
 }
 
@@ -561,14 +670,80 @@ int insertData(sqlite3 *pSqlite,char *str)
     return execSql(pSqlite,str);
 }
 
+int processOneTable(threadFunctionParameter *tfp)
+{
+    MYSQL *pMySQL = NULL;
+    sqlite3 *pSqlite = NULL;
+    tableName tableNameOne;
+
+    char sql[2046] = { 0 };
+    tableStruct tableStructOne;
+
+    int ret = 0;
+
+    memset(sql,0,sizeof(sql));
+    memset(&tableNameOne,0,sizeof(tableNameOne));
+    memset(&tableStructOne,0,sizeof(tableStructOne));
+
+    pMySQL = (MYSQL *)tfp->first;
+    pSqlite = (sqlite3 *)tfp->second;
+    memcpy(&tableNameOne,&tfp->table,sizeof(tableNameOne));
+    
+    ret = getTableStruct(pMySQL,tableNameOne,&tableStructOne);
+    if(ret < 0) { 
+        printf("call getTableStruct error.\n");
+        ret = -4;
+        goto END;
+    }
+
+    sprintf(sql,"DROP TABLE IF EXISTS %s;\n",tableNameOne.str);
+    ret = deleteTable(pSqlite,sql);
+    if(ret < 0) { 
+        printf("call createTable error.\n");
+        ret = -4;
+        goto END;
+    }
+    
+    ret = createTable(pSqlite,tableStructOne.str);
+    if(ret < 0) { 
+        printf("call createTable error.\n");
+        ret = -4;
+        goto END;
+    }
+    
+    ret = getIndexFromTable(pMySQL, tableNameOne, &tableStructOne);
+    if(ret < 0) { 
+        printf("call createTable error.\n");
+        ret = -4;
+        goto END;
+    }
+    
+    ret = createIndex(pSqlite,tableStructOne.str);
+    if(ret < 0) { 
+        printf("call createIndex error.\n");
+        ret = -4;
+        goto END;
+    }
+    
+    ret = getDataRow(pMySQL, pSqlite, tableNameOne, &tableStructOne);
+    if(ret < 0) { 
+        printf("call getDataRow error.\n");
+        ret = -4;
+        goto END;
+    }
+
+END:
+    return ret;
+}
+
 int processDB(char *db_file,char *user,char *passwd,char *database)
 {
     MYSQL *pMySQL = NULL;
     sqlite3 *pSqlite = NULL;
-    char sql[2046] = { 0 };
 
     tableName tableNameArray[60];
-    tableStruct tableStructOne;
+
+    threadFunctionParameter tfp;
 
     int num_table = 0;
 
@@ -577,7 +752,7 @@ int processDB(char *db_file,char *user,char *passwd,char *database)
     int ret = 0;
 
     memset(tableNameArray,0,sizeof(tableNameArray));
-    memset(&tableStructOne,0,sizeof(tableStructOne));
+    memset(&tfp,0,sizeof(threadFunctionParameter));
 
     if(strlen(db_file) <= 0 || strlen(user) <= 0 || 
         strlen(passwd) <= 0 || strlen(database) <= 0) {
@@ -585,6 +760,10 @@ int processDB(char *db_file,char *user,char *passwd,char *database)
         ret = -1;
         goto END;
     }
+
+    printf("version = %s\n", sqlite3_libversion());
+    printf("sqlite3_threadsafe = %d \n", sqlite3_threadsafe());
+    printf("mysql_thread_safe() = %d\n",mysql_thread_safe());
 
     pMySQL = mysql_init(NULL);
     if (pMySQL == NULL) {
@@ -615,61 +794,15 @@ int processDB(char *db_file,char *user,char *passwd,char *database)
     }
 
     num_table = ret;
-
+    tfp.first = pMySQL;
+    tfp.second = pSqlite;
     for(i = 0; i < num_table; i++) {
-        memset(&tableStructOne,0,sizeof(tableStructOne));
-        ret = getTableStruct(pMySQL,tableNameArray[i],&tableStructOne);
-        if(ret < 0) { 
-            printf("call getTableStruct error.\n");
+        memcpy(&tfp.table,&(tableNameArray[i]),sizeof(tableName));
+        ret = processOneTable(&tfp);
+        if(ret < 0) {
+            printf("call getListTables error.\n");
             ret = -4;
             goto END;
-        }
-
-        sprintf(sql,"DROP TABLE IF EXISTS %s;\n",tableNameArray[i].str);
-        ret = deleteTable(pSqlite,sql);
-        if(ret < 0) { 
-            printf("call createTable error.\n");
-            ret = -4;
-            goto END;
-        }
-
-        ret = createTable(pSqlite,tableStructOne.str);
-        if(ret < 0) { 
-            printf("call createTable error.\n");
-            ret = -4;
-            goto END;
-        }
-
-        ret = getIndexFromTable(pMySQL, tableNameArray[i], &tableStructOne);
-        if(ret < 0) { 
-            printf("call createTable error.\n");
-            ret = -4;
-            goto END;
-        }
-
-        ret = createIndex(pSqlite,tableStructOne.str);
-        if(ret < 0) { 
-            printf("call createIndex error.\n");
-            ret = -4;
-            goto END;
-        }
-
-        for(; 1;){
-            ret = getDataRow(pMySQL, tableNameArray[i], &tableStructOne);
-            if(ret < 0) { 
-                printf("call getDataRow error.\n");
-                ret = -4;
-                goto END;
-            } else if(ret > 0) {
-                ret = insertData(pSqlite,tableStructOne.str);
-                if(ret < 0) { 
-                    printf("call createIndex error.\n");
-                    ret = -4;
-                    goto END;
-                }
-            } else {
-                break;
-            }
         }
     }
 
